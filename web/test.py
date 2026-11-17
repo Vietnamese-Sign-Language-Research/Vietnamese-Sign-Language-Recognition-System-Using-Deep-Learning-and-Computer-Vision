@@ -41,21 +41,23 @@ async def lifespan(app):
 app = FastAPI(title="VSL Studio", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
+PAGE_HEADERS = {"Cache-Control": "no-cache"}
+
 
 @app.get("/")
 @app.get("/home.html")
 def home_page():
-    return FileResponse(BASE_DIR / "home" / "home.html")
+    return FileResponse(BASE_DIR / "home" / "home.html", headers=PAGE_HEADERS)
 
 
 @app.get("/upload.html")
 def upload_page():
-    return FileResponse(BASE_DIR / "upload" / "upload.html")
+    return FileResponse(BASE_DIR / "upload" / "upload.html", headers=PAGE_HEADERS)
 
 
 @app.get("/webcam.html")
 def webcam_page():
-    return FileResponse(BASE_DIR / "webcam" / "webcam.html")
+    return FileResponse(BASE_DIR / "webcam" / "webcam.html", headers=PAGE_HEADERS)
 
 
 @app.get("/upload")
