@@ -265,12 +265,19 @@ function validDemo(demo) {
     (demo.end === undefined || demo.end > (demo.start || 0));
 }
 const demoForSign = label => state.demonstrations.find(demo => normalizeSign(demo.label) === normalizeSign(label));
+const letterIllustrations = new Set("ABCDEGHIKLMNOPQRSTUVXY");
+const dictionaryLetterVideos = new Set("ABCDEGHIMNOPQRTUVXY");
+const letterDictionary = "https://tudienngonngukyhieu.com/bang-chu-cai-ngon-ngu-ky-hieu";
+const alphabetLesson = "https://www.youtube.com/watch?v=ggQY-g4aQp8";
+
 function renderVocabulary() {
   const model = currentModel(), query = normalizeSign($("vocabulary-search").value);
-  const sentenceMode = state.mode === "sentences";
+  const sentenceMode = state.mode === "sentences", letterMode = state.mode === "letters";
   const demoCount = (model?.labels || []).filter(label => demoForSign(label)).length;
-  $("demo-library-note").hidden = !sentenceMode;
-  $("demo-library-note").textContent = "Choose a phrase to see how to sign it. " + demoCount + " of " + (model?.count || 0) + " phrases have a reference video.";
+  $("demo-library-note").hidden = !sentenceMode && !letterMode;
+  $("demo-library-note").textContent = letterMode
+    ? "Choose a letter to see its handshape and watch a signing tutorial."
+    : "Choose a phrase to see how to sign it. " + demoCount + " of " + (model?.count || 0) + " phrases have a reference video.";
   $("video-filter").hidden = !sentenceMode || !demoCount;
   $("video-filter").textContent = "With videos · " + demoCount;
   $("video-filter").setAttribute("aria-pressed", state.videosOnly);
@@ -278,14 +285,26 @@ function renderVocabulary() {
   if (sentenceMode) labels.sort((a, b) => Number(Boolean(demoForSign(b))) - Number(Boolean(demoForSign(a))));
   $("vocabulary-list").replaceChildren();
   labels.forEach(label => {
+    if (letterMode) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "vocabulary-chip letter-chip";
+      button.textContent = label;
+      button.setAttribute("aria-label", "How to sign letter " + label);
+      button.dataset.sign = label;
+      button.addEventListener("click", () => showLetterGuide(label));
+      $("vocabulary-list").append(button);
+      return;
+    }
     if (!sentenceMode) {
-      const chip = document.createElement("span"); chip.className = "vocabulary-chip" + (state.mode === "letters" ? " letter-chip" : ""); chip.textContent = label; $("vocabulary-list").append(chip); return;
+      const chip = document.createElement("span"); chip.className = "vocabulary-chip"; chip.textContent = label; $("vocabulary-list").append(chip); return;
     }
     const demo = demoForSign(label), button = document.createElement("button");
     button.type = "button"; button.className = "vocabulary-sign" + (demo ? " has-video" : "");
     const title = document.createElement("strong"), hint = document.createElement("span");
     title.textContent = label; hint.textContent = demo ? "Watch video" : "Video unavailable";
     button.append(title, hint); button.setAttribute("aria-label", label + " · " + hint.textContent);
+    button.dataset.sign = label;
     button.addEventListener("click", () => showSignDemo(label)); $("vocabulary-list").append(button);
   });
   $("vocabulary-list").classList.toggle("sentence-list", sentenceMode);
@@ -300,14 +319,52 @@ function showVocabularyList() {
   $("vocabulary-dialog").classList.remove("showing-demo");
   renderVocabulary();
   if (state.selectedSign) {
-    [...$("vocabulary-list").querySelectorAll("button")].find(button => button.querySelector("strong").textContent === state.selectedSign)?.focus();
+    [...$("vocabulary-list").querySelectorAll("button")].find(button => button.dataset.sign === state.selectedSign)?.focus();
   }
 }
+
+function openGuide(label, title, backLabel) {
+  state.selectedSign = label;
+  clearDemoPlayer(); $("vocabulary-browser").hidden = true; $("demo-detail").hidden = false;
+  $("vocabulary-dialog").classList.add("showing-demo");
+  $("demo-title").textContent = title;
+  $("demo-back").textContent = backLabel;
+}
+
+function showLetterGuide(label) {
+  if (state.mode !== "letters" || !currentModel()?.labels.includes(label)) return;
+  openGuide(label, "How to sign " + label, "← All supported letters");
+  for (const id of ["demo-unavailable", "demo-player", "demo-credit", "demo-open-source", "demo-guidance"]) $(id).hidden = true;
+  $("letter-guide").hidden = false;
+  $("practice-sign").hidden = false;
+  const hasImage = letterIllustrations.has(label), hasLetterVideo = dictionaryLetterVideos.has(label);
+  const image = $("letter-guide-image"), figure = image.closest("figure");
+  const hint = $("letter-guide-hint"), video = $("letter-guide-video");
+  figure.hidden = !hasImage;
+  hint.textContent = hasImage
+    ? "Match the finger positions and palm direction in the illustration. Keep your whole hand in view when you try it."
+    : "An illustration isn’t available for this letter yet. See the full alphabet tutorial for guidance.";
+  if (hasImage) {
+    image.onerror = () => {
+      figure.hidden = true;
+      hint.textContent = "The illustration could not load. You can still open the video tutorial.";
+    };
+    image.alt = "National fingerspelling illustration of the handshape for " + label;
+    image.src = "/assets/signs/letters/" + label.toLowerCase() + ".png";
+  } else {
+    image.removeAttribute("src");
+  }
+  video.href = hasLetterVideo ? letterDictionary + "?chu-cai=" + label.toLowerCase() : alphabetLesson;
+  video.querySelector("span").textContent = hasLetterVideo ? "Watch the " + label + " tutorial" : "Watch the full alphabet lesson";
+  $("letter-video-credit").textContent = hasLetterVideo ? "Vietnamese Sign Language Dictionary · opens in a new tab" : "Hanoi Sign Language Training Center · YouTube";
+  $("demo-back").focus(); $("vocabulary-dialog").scrollTop = 0;
+}
+
 function showSignDemo(label) {
   if (!currentModel()?.labels.includes(label) || state.mode !== "sentences") return;
-  state.selectedSign = label; const demo = demoForSign(label);
-  clearDemoPlayer(); $("vocabulary-browser").hidden = true; $("demo-detail").hidden = false;
-  $("vocabulary-dialog").classList.add("showing-demo"); $("demo-title").textContent = label;
+  openGuide(label, label, "← All supported phrases");
+  const demo = demoForSign(label);
+  $("letter-guide").hidden = true;
   $("demo-unavailable").hidden = Boolean(demo); $("demo-player").hidden = !demo;
   $("demo-credit").hidden = !demo; $("demo-open-source").hidden = !demo;
   $("demo-guidance").hidden = !demo; $("practice-sign").hidden = !demo;
@@ -382,8 +439,11 @@ $("demo-other-signs").addEventListener("click", () => { state.videosOnly = true;
 $("video-filter").addEventListener("click", () => { state.videosOnly = !state.videosOnly; renderVocabulary(); });
 $("practice-sign").addEventListener("click", () => {
   $("vocabulary-dialog").close();
-  toast(state.source === "webcam" ? "Ready to try " + state.selectedSign + (state.stream ? " Start a sign when you’re ready." : " Enable your camera, then start a sign.") : "Ready to try " + state.selectedSign + " Upload your sign clip, then confirm to translate.");
-  $(state.source === "webcam" ? "camera-button" : "dropzone").focus();
+  const step = state.source === "webcam"
+    ? (state.stream ? "Start a sign when you’re ready." : "Enable your camera, then start a sign.")
+    : (state.mode === "letters" ? "Upload a photo of your handshape, then select Translate sign." : "Upload your sign clip, then select Translate sign.");
+  toast("Ready to try: " + state.selectedSign + " — " + step);
+  $(state.source === "webcam" ? "camera-button" : state.file ? "translate-button" : "dropzone").focus();
 });
 $("vocabulary-dialog").addEventListener("click", event => { if (event.target === $("vocabulary-dialog")) { const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) event.target.close(); } });
 $("vocabulary-search").addEventListener("input", renderVocabulary);

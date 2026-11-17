@@ -1,4 +1,21 @@
-# Sentence demonstration videos
+# Signing guide sources
+
+## Letter illustrations and tutorials
+
+The 22 PNGs in `letters/` are individual grayscale crops from
+[Vietnam's national fingerspelling chart](https://congbaocdn.chinhphu.vn/CongBaoCP/VanBan/2020/6/31603/31697-1-2020671-67217-2020-tt-bgddt.pdf#page=6),
+section II, gazette page 51, published with Ministry of Education and Training
+Circular 17/2020/TT-BGDĐT. The app includes only the letters its current
+alphabet checkpoint recognizes. The drawings are educational references,
+not photos from the training set.
+
+Individual tutorial links open the corresponding letter of the
+[Vietnamese Sign Language Dictionary](https://tudienngonngukyhieu.com/bang-chu-cai-ngon-ngu-ky-hieu).
+K, L, and S link to the Hanoi Sign Language Training Center's
+[full alphabet lesson](https://www.youtube.com/watch?v=ggQY-g4aQp8)
+on YouTube. Tutorials may show regional variants; no letter videos are bundled.
+
+## Sentence demonstration videos
 
 These public videos are embedded using YouTube’s player. No source video is copied or redistributed. The demonstrations are learning references; they are not confirmed recordings from the model’s training set. Regional signing may differ.
 
