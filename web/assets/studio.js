@@ -7,8 +7,7 @@ const state = { source: document.body.dataset.page === "webcam" ? "webcam" : "up
 let toastTimer;
 const samples = [
   { id: "sample-1", file: "sample-1.jpg", title: "Letter Y" },
-  { id: "sample-2", file: "sample-2.jpg", title: "Letter X" },
-  { id: "sample-3", file: "sample-3.jpg", title: "Letter D" }
+  { id: "sample-2", file: "sample-2.jpg", title: "Letter X" }
 ];
 const currentModel = () => state.models.find(model => model.id === state.mode);
 const available = () => Boolean(currentModel()?.available);

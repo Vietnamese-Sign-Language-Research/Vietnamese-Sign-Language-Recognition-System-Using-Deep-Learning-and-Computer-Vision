@@ -131,7 +131,7 @@ class ApiTests(unittest.TestCase):
         modes = {item["id"]: item for item in self.client.get("/api/models").json()["models"]}
         self.assertEqual(modes["letters"]["count"], 22)
         self.assertTrue(modes["sentences"]["available"])
-        for name, expected in [("sample-1.jpg", "Y"), ("sample-2.jpg", "X"), ("sample-3.jpg", "D")]:
+        for name, expected in [("sample-1.jpg", "Y"), ("sample-2.jpg", "X")]:
             content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / name).read_bytes()
             response = self.client.post("/api/upload", data={"mode": "letters"}, files={"file": (name, content, "image/jpeg")})
             self.assertEqual(response.status_code, 200, response.text)

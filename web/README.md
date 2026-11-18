@@ -126,7 +126,8 @@ The suite exercises real image inference, video decoding, live tracking,
 session lifecycle, left/right ordering, corruption/empty-file rejection,
 blank-input rejection, natural movement boundaries, jitter, dropped tracking,
 and absence of results before the six-second pause. The bundled source-dataset
-samples recognize **Y, X, D**. These are pipeline checks, not an independent
+samples recognize **Y and X**. The former D sample was removed because its
+source annotation is Đ, outside the checkpoint's vocabulary. These are pipeline checks, not an independent
 accuracy benchmark. Physical camera smoothness still depends on the device,
 browser, and lighting.
 
