@@ -39,7 +39,7 @@ async def lifespan(app):
     registry.close()
 
 
-app = FastAPI(title="VSL Studio", version="2026.11.18.1", lifespan=lifespan)
+app = FastAPI(title="VSL Studio", version="2026.11.18.2", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
 PAGE_HEADERS = {"Cache-Control": "no-cache"}

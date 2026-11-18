@@ -174,6 +174,11 @@ second YOLO model, whose additional inference memory could restart Render's
 Client retry controls also recover from interrupted or incomplete responses
 without waiting for session cleanup to finish.
 
+Deployment requirements explicitly select PyTorch 2.8.0 CPU and the matching
+torchvision 0.23.0 CPU build from the official PyTorch wheel index. Inference
+uses one thread to fit the free host's CPU and memory allocation. Local tests
+use the same CPU runtime. The pretrained model tensors are unchanged.
+
 The checkpoint records approved_for_demo=True and approved_for_production=False.
 Failed H/K/R quality checks remain recorded rather than being presented as
 passed. See [training/HKR-RESULTS.md](training/HKR-RESULTS.md) and

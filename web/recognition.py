@@ -17,7 +17,9 @@ import numpy as np
 import torch
 from predict_realtime import CLASS_NAMES_FALLBACK, ResNet1D, load_any_checkpoint, mp_frame_to_126
 
-torch.set_num_threads(min(4, os.cpu_count() or 1))
+# The deployed host has a fraction of one CPU. Extra inference threads retain
+# additional workspaces and compete for the same small allocation.
+torch.set_num_threads(1)
 MAX_SEQUENCE_SECONDS = 45.0
 SAMPLE_FPS = 6
 PHRASES = [
