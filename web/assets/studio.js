@@ -16,9 +16,15 @@ const available = () => Boolean(currentModel()?.available);
 function showError(message = "") { $("input-error").textContent = message; $("input-error").hidden = !message; }
 function toast(message) { clearTimeout(toastTimer); $("toast").textContent = message; $("toast").hidden = false; toastTimer = setTimeout(() => { $("toast").hidden = true; }, 3500); }
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The request could not be completed. Try again.");
+  let response;
+  try { response = await fetch(url, options); }
+  catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error("Connection interrupted. Please try your sign again in a moment.");
+  }
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof data?.detail === "string" ? data.detail : "The service is temporarily unavailable. Please try your sign again in a moment.");
+  if (!data || typeof data !== "object") throw new Error("The service returned an incomplete response. Please try your sign again.");
   return data;
 }
 function setBusy(value) {
@@ -52,6 +58,7 @@ function detailRow(label, value) {
   row.append(key, val); return row;
 }
 function showResult(result, elapsed = null) {
+  if (!result || !["recognized", "uncertain", "no_sign"].includes(result.status)) throw new Error("The result could not be read. Please try your sign again.");
   state.result = result;
   $("result-empty").hidden = true; $("result-loading").hidden = true; $("result-content").hidden = false;
   const matched = Boolean(result.label);
@@ -281,7 +288,9 @@ async function endSession() {
   state.running = false; state.generation += 1; clearTimeout(state.timer); state.controller?.abort(); state.controller = null;
   const id = state.session; state.session = null;
   $("vocabulary-button").disabled = state.busy || !available();
-  if (id) await fetch("/api/live/" + id, { method: "DELETE", keepalive: true }).catch(() => {});
+  // Cleanup continues in the background if the host has restarted. Never
+  // leave the retry controls waiting for an unavailable server to acknowledge it.
+  if (id) void fetch("/api/live/" + id, { method: "DELETE", keepalive: true }).catch(() => {});
 }
 async function stopCamera() {
   await endSession();

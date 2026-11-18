@@ -167,6 +167,13 @@ The user-approved retrained model is deployed as a demo release. It supports
 23 base letters, including Đ; H, K and R remain experimental and return a
 possible-match state. The original model remains available for rollback.
 
+Normal letter recognition loads only the retrained model. A missing or uncertain
+match returns a retry/possible-match result directly; it no longer invokes a
+second YOLO model, whose additional inference memory could restart Render's
+512 MB free instance. Set `VSL_LETTER_ENGINE=legacy` only for an explicit rollback.
+Client retry controls also recover from interrupted or incomplete responses
+without waiting for session cleanup to finish.
+
 The checkpoint records approved_for_demo=True and approved_for_production=False.
 Failed H/K/R quality checks remain recorded rather than being presented as
 passed. See [training/HKR-RESULTS.md](training/HKR-RESULTS.md) and

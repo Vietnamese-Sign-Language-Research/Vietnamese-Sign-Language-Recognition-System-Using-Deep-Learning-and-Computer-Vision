@@ -127,6 +127,25 @@ class CaptureTests(unittest.TestCase):
             model.image_result.assert_not_called()
             session.close()
 
+    def test_finish_releases_tracking_memory_even_if_prediction_fails(self):
+        with patch("recognition.hand_tracker") as tracker:
+            session=LiveSession("letters")
+            session.last_frame=np.zeros((32,32,3),dtype=np.uint8)
+            session.capture.samples.append((0,hand_vector()))
+            model=Mock()
+            def failed_prediction(*args):
+                tracker.return_value.close.assert_called_once()
+                raise RuntimeError("Prediction failed")
+            model.image_result.side_effect=failed_prediction
+            with self.assertRaisesRegex(RuntimeError,"Prediction failed"):
+                session.finish(model)
+            self.assertIsNone(session.tracker)
+            self.assertIsNone(session.last_frame)
+            self.assertIsNone(session.last_hand_frame)
+            self.assertEqual(len(session.capture.samples),0)
+            session.close()
+            tracker.return_value.close.assert_called_once()
+
     def test_safety_limit_stops_without_running_inference(self):
         with patch("recognition.hand_tracker") as tracker, patch("recognition.time.monotonic", return_value=0):
             tracker.return_value.process.return_value = SimpleNamespace(multi_hand_landmarks=None)
@@ -210,6 +229,28 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/api/upload", files={"file": ("blank.png", content.getvalue(), "image/png")})
         self.assertEqual(response.json()["status"], "no_sign")
         self.assertIsNone(response.json()["label"])
+
+    def test_repeated_rejections_allow_a_subsequent_valid_letter(self):
+        content = io.BytesIO()
+        Image.new("RGB", (640, 480), "black").save(content, format="JPEG")
+        for _ in range(3):
+            response = self.client.post("/api/upload", data={"mode":"letters"},
+                files={"file":("blank.jpg",content.getvalue(),"image/jpeg")})
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()["status"],"no_sign")
+            key=self.client.post("/api/live/session",data={"mode":"letters"}).json()["id"]
+            try:
+                frame=self.client.post(f"/api/live/{key}/frame",files={"file":("frame.jpg",content.getvalue(),"image/jpeg")})
+                self.assertEqual(frame.status_code,200,frame.text)
+                result=self.client.post(f"/api/live/{key}/finish")
+                self.assertEqual(result.status_code,200,result.text)
+                self.assertEqual(result.json()["result"]["status"],"no_sign")
+            finally:
+                self.client.delete(f"/api/live/{key}")
+        valid=(Path(__file__).resolve().parents[1]/"assets"/"samples"/"sample-b.jpg").read_bytes()
+        response=self.client.post("/api/upload",data={"mode":"letters"},files={"file":("b.jpg",valid,"image/jpeg")})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["label"],"B")
 
     def test_actual_video_decode_with_no_hands(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -39,7 +39,7 @@ async def lifespan(app):
     registry.close()
 
 
-app = FastAPI(title="VSL Studio", lifespan=lifespan)
+app = FastAPI(title="VSL Studio", version="2026.11.18.1", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
 PAGE_HEADERS = {"Cache-Control": "no-cache"}
@@ -73,7 +73,7 @@ def old_webcam():
 
 @app.get("/api/models")
 def models():
-    return {"models": registry.metadata(), "capture_mode": "manual", "max_sequence_seconds": MAX_SEQUENCE_SECONDS, "sample_fps": SAMPLE_FPS}
+    return {"models": registry.metadata(), "version": app.version, "capture_mode": "manual", "max_sequence_seconds": MAX_SEQUENCE_SECONDS, "sample_fps": SAMPLE_FPS}
 
 
 def validate_mode(mode):

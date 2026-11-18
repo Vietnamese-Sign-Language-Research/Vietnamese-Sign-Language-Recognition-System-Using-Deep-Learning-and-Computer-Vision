@@ -1,5 +1,6 @@
 """Protect the language-specific model routing and candidate release boundary."""
 import tempfile
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -28,31 +29,43 @@ class LetterReleaseTests(unittest.TestCase):
         np.testing.assert_equal(merge_k_specialist(initial,[.9]),initial)
         self.assertEqual(LETTERS[int(merge_k_specialist(initial,[.99]).argmax())],'K')
 
-    def fallback_registry(self,label,boxes=None):
+    def test_rejected_and_uncertain_poses_never_invoke_a_second_model(self):
         registry=ModelRegistry()
         registry.letters=Mock()
-        registry.letters.image_result.return_value={'status':'no_sign','label':None}
         registry.detectors['letters']=object()
-        registry._detector_image_result=Mock(return_value={'status':'recognized','label':label,
-            'details':{'score':.79,'boxes':boxes or []}})
-        return registry
+        registry._detector_image_result=Mock(side_effect=AssertionError('Unexpected legacy inference'))
+        for result in [{'status':'no_sign','label':None},
+                       {'status':'no_sign','label':None,'details':{'alternatives':[{'label':'X','score':.3}]}},
+                       {'status':'uncertain','label':'H'},
+                       {'status':'uncertain','label':'B'},
+                       {'status':'recognized','label':'Y'}]:
+            registry.letters.image_result.return_value=result
+            self.assertIs(registry.image_result(np.zeros((32,32,3),dtype='uint8'),'letters'),result)
+        registry._detector_image_result.assert_not_called()
 
-    def test_fallback_never_reintroduces_conflicting_labels(self):
-        for label in ['H','K','R','D']:
-            registry=self.fallback_registry(label)
-            registry._detector_image_result.return_value['details']['score']=.99
-            self.assertIsNone(registry.image_result(np.zeros((32,32,3),dtype='uint8'),'letters')['label'])
+    def test_loading_retrained_letters_does_not_load_legacy_weights(self):
+        yolo=Mock()
+        with patch.dict(os.environ,{'VSL_LETTER_ENGINE':'auto','VSL_LETTER_MODEL':'','VSL_WORD_MODEL':'missing-test-words.pt'}), \
+             patch.dict('sys.modules',{'ultralytics':SimpleNamespace(YOLO=yolo)}), \
+             patch('recognition.load_any_checkpoint',return_value={}), patch('recognition.ResNet1D'), \
+             patch('letter_skeleton.SkeletonRecognizer') as skeleton:
+            registry=ModelRegistry();registry.load()
+            self.assertIs(registry.letters,skeleton.return_value)
+            self.assertNotIn('letters',registry.detectors)
+            yolo.assert_not_called()
+            registry.close()
 
-    def test_separate_agreeing_hands_can_preserve_small_photo_recognition(self):
-        boxes=[{'label':'X','score':.79,'bounds':[.1,.1,.3,.8]},
-               {'label':'X','score':.78,'bounds':[.7,.1,.9,.8]}]
-        registry=self.fallback_registry('X',boxes)
-        self.assertEqual(registry.image_result(np.zeros((32,32,3),dtype='uint8'),'letters')['label'],'X')
-
-    def test_duplicate_photo_boxes_are_not_two_hand_consensus(self):
-        box={'label':'X','score':.79,'bounds':[.1,.1,.3,.8]}
-        registry=self.fallback_registry('X',[box,box])
-        self.assertIsNone(registry.image_result(np.zeros((32,32,3),dtype='uint8'),'letters')['label'])
+    def test_original_detector_is_available_only_when_selected(self):
+        yolo=Mock();yolo.return_value.task='detect'
+        with patch.dict(os.environ,{'VSL_LETTER_ENGINE':'legacy','VSL_LETTER_MODEL':'','VSL_WORD_MODEL':'missing-test-words.pt'}), \
+             patch.dict('sys.modules',{'ultralytics':SimpleNamespace(YOLO=yolo)}), \
+             patch('recognition.load_any_checkpoint',return_value={}), patch('recognition.ResNet1D'), \
+             patch('letter_skeleton.SkeletonRecognizer') as skeleton:
+            registry=ModelRegistry();registry.load()
+            self.assertIsNone(registry.letters)
+            self.assertIs(registry.detectors['letters'],yolo.return_value)
+            skeleton.assert_not_called()
+            yolo.assert_called_once()
 
     def test_corrected_model_advertises_its_actual_vocabulary(self):
         registry=ModelRegistry()

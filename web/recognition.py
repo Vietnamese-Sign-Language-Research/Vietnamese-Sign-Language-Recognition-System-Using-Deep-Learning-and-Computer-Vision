@@ -145,6 +145,11 @@ class ModelRegistry:
                     try:
                         from letter_skeleton import SkeletonRecognizer
                         self.letters = SkeletonRecognizer(skeleton_path, allow_demo=True)
+                        # A rejected pose is a normal result, not a reason to
+                        # load/run a second photo model. Its first inference
+                        # can exceed the free host's memory limit. The original
+                        # detector remains available via VSL_LETTER_ENGINE=legacy.
+                        continue
                     except Exception as exc:
                         self.errors[mode] = f"Vietnamese letter model could not load: {type(exc).__name__}."
                         continue
@@ -198,24 +203,7 @@ class ModelRegistry:
     def image_result(self, rgb, mode):
         if mode == "letters" and self.letters is not None:
             with self.lock:
-                primary = self.letters.image_result(rgb)
-            # Retain the original detector for confident, non-conflicting photo
-            # cases. It must never reintroduce the audited H/K/R or D/Đ mapping.
-            alternatives = primary.get("details", {}).get("alternatives", [])
-            proposed = alternatives[0]["label"] if alternatives else None
-            if primary["status"] != "recognized" and proposed not in {"H", "K", "R"} and "letters" in self.detectors:
-                fallback = self._detector_image_result(rgb, mode)
-                details = fallback.get("details", {})
-                boxes = [b for b in details.get("boxes", []) if b["label"] == fallback.get("label") and b["score"] >= .75]
-                # A low-resolution teaching photo can show the same sign with
-                # two hands. Require separate, agreeing detections before using
-                # the lower threshold; duplicate boxes on one hand do not count.
-                agreement = any(abs((a["bounds"][0]+a["bounds"][2])-(b["bounds"][0]+b["bounds"][2]))/2 > .25
-                                for i,a in enumerate(boxes) for b in boxes[i+1:])
-                if fallback.get("label") not in {None, "H", "K", "R", "D"} and (details.get("score", 0) >= .85 or agreement):
-                    fallback["details"]["note"] = "Original photo detector fallback; H/K/R and the ambiguous D mapping are excluded."
-                    return fallback
-            return primary
+                return self.letters.image_result(rgb)
         return self._detector_image_result(rgb, mode)
 
     def _detector_image_result(self, rgb, mode):
@@ -291,6 +279,7 @@ class LiveSession:
             if state["phase"] == "timeout":
                 self.result = {"status": "no_sign", "label": None, "message": "Recording reached 45 seconds. Start again and select Finish sign before the limit."}
                 state["result"] = self.result
+                self._release_capture()
             else:
                 # Retain only two bounded-size frames. The last clear hand is
                 # useful when a user lowers their signing hand to click Finish.
@@ -306,19 +295,33 @@ class LiveSession:
                 return {"phase": "cancelled"}
             if self.result is None:
                 self.capture.finish()
-                if self.mode == "sentences":
-                    self.result = registry.sequence_result(self.capture.active_vectors(), self.capture.movement_count)
-                else:
-                    frame = self.last_hand_frame if self.last_hand_frame is not None else self.last_frame
-                    self.result = registry.image_result(frame, self.mode) if frame is not None else {
-                        "status": "no_sign", "label": None,
-                        "message": "No camera frames were recorded. Start a sign, keep your hand in view, then select Finish sign."}
+                # Recording is over. Release its MediaPipe graph before model
+                # inference, without waiting for a browser DELETE request.
+                self._close_tracker()
+                try:
+                    if self.mode == "sentences":
+                        self.result = registry.sequence_result(self.capture.active_vectors(), self.capture.movement_count)
+                    else:
+                        frame = self.last_hand_frame if self.last_hand_frame is not None else self.last_frame
+                        self.result = registry.image_result(frame, self.mode) if frame is not None else {
+                            "status": "no_sign", "label": None,
+                            "message": "No camera frames were recorded. Start a sign, keep your hand in view, then select Finish sign."}
+                finally:
+                    self._release_capture()
             return {"phase": "complete", "result": self.result}
+
+    def _close_tracker(self):
+        if self.tracker is not None:
+            self.tracker.close()
+            self.tracker = None
+
+    def _release_capture(self):
+        self._close_tracker()
+        self.last_frame = self.last_hand_frame = None
+        self.capture.samples.clear()
 
     def close(self):
         with self.lock:
             if not self.closed:
                 self.closed = True
-                self.tracker.close()
-                self.last_frame = self.last_hand_frame = None
-                self.capture.samples.clear()
+                self._release_capture()

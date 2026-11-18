@@ -21,7 +21,7 @@ function client(fetch) {
     const value = {hidden:false, disabled:false, style:{}, textContent:'', dataset:{},
       videoWidth:640, videoHeight:480, readyState:2,
       classList:{toggle(){},add(){},remove(){}},
-      addEventListener(){}, setAttribute(){}, removeAttribute(){}, pause(){}, load(){},
+      addEventListener(){}, setAttribute(){}, removeAttribute(){}, pause(){}, load(){}, replaceChildren(){}, append(){},
       querySelector:selector => selector === 'span' ? span : {setAttribute(){}}};
     elements.set(id,value);return value;
   }
@@ -62,6 +62,47 @@ test('Finish waits for the last frame, disables repeat clicks, then predicts exa
   assert.equal(app.element('camera-button').querySelector('span').textContent,'Start another sign');
   assert.equal(app.element('camera-button').disabled,false);
 });
+
+test('No match leaves the camera ready for another successful sign, even if cleanup stalls',async () => {
+  let attempt=0;
+  const app=client(async (url,options={}) => {
+    if (url==='/api/live/session') return ok({id:'retry-'+(++attempt),max_seconds:45});
+    if (url.endsWith('/frame')) return ok({phase:'waiting_hands',elapsed:1,hands:0});
+    if (url.endsWith('/finish')) return ok({phase:'complete',result:attempt===1
+      ? {status:'no_sign',label:null,message:'No supported sign found. Try again.'}
+      : {status:'recognized',label:'B',message:'Sign recognized.'}});
+    if (options.method==='DELETE') return new Promise(()=>{});
+  });
+  await app.run('startSign()');await app.run('finishSign()');
+  assert.equal(app.element('result-status').textContent,'NO CLEAR MATCH');
+  assert.equal(app.element('copy-result').disabled,true);
+  assert.equal(app.element('camera-button').disabled,false);
+  assert.equal(app.run('state.busy || state.finishing'),false);
+  await app.run('startSign()');await app.run('finishSign()');
+  assert.equal(app.element('result-label').textContent,'B');
+  assert.equal(app.element('camera-button').disabled,false);
+});
+
+for (const failure of ['disconnect','503','malformed']) {
+  test(`A ${failure} prediction response resets the spinner and allows a retry`,async () => {
+    const app=client(async url => {
+      if (url==='/api/live/session') return ok({id:'error',max_seconds:45});
+      if (url.endsWith('/frame')) return ok({phase:'capturing',elapsed:1,hands:1});
+      if (url.endsWith('/finish')) {
+        if (failure==='disconnect') throw new TypeError('Failed to fetch');
+        if (failure==='503') return {ok:false,json:async()=>{throw new Error('HTML instead of JSON');}};
+        return ok({phase:'complete'});
+      }
+      return ok({closed:true});
+    });
+    await app.run('startSign()');await app.run('finishSign()');
+    assert.equal(app.element('result-loading').hidden,true);
+    assert.equal(app.element('camera-button').disabled,false);
+    assert.equal(app.element('camera-button').querySelector('span').textContent,'Start another sign');
+    assert.match(app.element('input-error').textContent,/try your sign again/i);
+    assert.equal(app.run('state.busy || state.finishing || state.running'),false);
+  });
+}
 
 test('Capturing beyond six seconds keeps Finish enabled and never requests a prediction',async () => {
   const calls=[];
