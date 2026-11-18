@@ -16,6 +16,7 @@ import mediapipe as mp
 import numpy as np
 import torch
 from predict_realtime import CLASS_NAMES_FALLBACK, ResNet1D, load_any_checkpoint, mp_frame_to_126
+from memory_runtime import release_native_memory
 
 # The deployed host has a fraction of one CPU. Extra inference threads retain
 # additional workspaces and compete for the same small allocation.
@@ -314,13 +315,19 @@ class LiveSession:
 
     def _close_tracker(self):
         if self.tracker is not None:
-            self.tracker.close()
+            tracker = self.tracker
             self.tracker = None
+            try:
+                tracker.close()
+            finally:
+                del tracker
+                release_native_memory()
 
     def _release_capture(self):
         self._close_tracker()
         self.last_frame = self.last_hand_frame = None
         self.capture.samples.clear()
+        release_native_memory()
 
     def close(self):
         with self.lock:

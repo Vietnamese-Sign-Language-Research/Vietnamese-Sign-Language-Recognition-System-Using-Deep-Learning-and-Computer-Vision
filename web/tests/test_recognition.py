@@ -128,13 +128,14 @@ class CaptureTests(unittest.TestCase):
             session.close()
 
     def test_finish_releases_tracking_memory_even_if_prediction_fails(self):
-        with patch("recognition.hand_tracker") as tracker:
+        with patch("recognition.hand_tracker") as tracker, patch("recognition.release_native_memory") as reclaim:
             session=LiveSession("letters")
             session.last_frame=np.zeros((32,32,3),dtype=np.uint8)
             session.capture.samples.append((0,hand_vector()))
             model=Mock()
             def failed_prediction(*args):
                 tracker.return_value.close.assert_called_once()
+                reclaim.assert_called()
                 raise RuntimeError("Prediction failed")
             model.image_result.side_effect=failed_prediction
             with self.assertRaisesRegex(RuntimeError,"Prediction failed"):
@@ -275,6 +276,36 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("result", response.json())
         self.assertEqual(self.client.delete(f"/api/live/{key}").status_code, 200)
         self.assertEqual(self.client.post(f"/api/live/{key}/frame", files={"file": ("frame.jpg", content.getvalue(), "image/jpeg")}).status_code, 404)
+
+    def test_camera_capacity_returns_retry_and_frees_capacity_after_finish(self):
+        keys=[]
+        try:
+            first=self.client.post("/api/live/session",data={"mode":"letters"})
+            self.assertEqual(first.status_code,200,first.text)
+            keys.append(first.json()["id"])
+            busy=self.client.post("/api/live/session",data={"mode":"letters"})
+            self.assertEqual(busy.status_code,429)
+            self.assertIn("recording",busy.json()["detail"])
+            self.assertEqual(self.client.post(f"/api/live/{keys[0]}/finish").status_code,200)
+            second=self.client.post("/api/live/session",data={"mode":"letters"})
+            self.assertEqual(second.status_code,200,second.text)
+            keys.append(second.json()["id"])
+        finally:
+            for key in keys:self.client.delete(f"/api/live/{key}")
+
+    def test_abandoned_recording_expires_before_admitting_a_new_one(self):
+        from test import sessions
+        keys=[]
+        try:
+            first=self.client.post("/api/live/session",data={"mode":"letters"})
+            keys.append(first.json()["id"])
+            sessions[keys[0]].capture.started_at-=51
+            second=self.client.post("/api/live/session",data={"mode":"letters"})
+            self.assertEqual(second.status_code,200,second.text)
+            keys.append(second.json()["id"])
+            self.assertEqual(self.client.post(f"/api/live/{keys[0]}/finish").status_code,404)
+        finally:
+            for key in keys:self.client.delete(f"/api/live/{key}")
 
     def test_real_camera_frames_are_predicted_only_after_manual_finish(self):
         content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / "sample-y.jpg").read_bytes()

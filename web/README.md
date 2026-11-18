@@ -179,6 +179,15 @@ torchvision 0.23.0 CPU build from the official PyTorch wheel index. Inference
 uses one thread to fit the free host's CPU and memory allocation. Local tests
 use the same CPU runtime. The pretrained model tensors are unchanged.
 
+Render start command: `sh web/render-start.sh`. This sets glibc arena/mapping
+limits before Python starts. Finished/cancelled recordings explicitly collect
+and trim freed native buffers; upload requests also reclaim their temporary
+image allocations. One active webcam recording is allowed by default on the
+free instance (`VSL_MAX_ACTIVE_CAPTURES` can raise this on larger instances).
+Other visitors can still browse and upload; a concurrent recording receives a
+retry message instead of allocating another tracking graph. Abandoned captures
+expire after the recording limit plus a short grace period.
+
 The checkpoint records approved_for_demo=True and approved_for_production=False.
 Failed H/K/R quality checks remain recorded rather than being presented as
 passed. See [training/HKR-RESULTS.md](training/HKR-RESULTS.md) and

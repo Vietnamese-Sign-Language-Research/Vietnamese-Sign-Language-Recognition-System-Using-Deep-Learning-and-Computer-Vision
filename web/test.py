@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import secrets
 import tempfile
 import time
@@ -20,11 +21,13 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
 from recognition import BASE_DIR, LiveSession, ModelRegistry, MAX_SEQUENCE_SECONDS, SAMPLE_FPS, hand_tracker, mp_frame_to_126, tracking_image
+from memory_runtime import release_native_memory
 
 registry = ModelRegistry()
 sessions: dict[str, LiveSession] = {}
 session_lock = Lock()
 MAX_UPLOAD = 30 * 1024 * 1024
+MAX_ACTIVE_CAPTURES = max(1, int(os.environ.get("VSL_MAX_ACTIVE_CAPTURES", "1")))
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi"}
 
@@ -39,7 +42,7 @@ async def lifespan(app):
     registry.close()
 
 
-app = FastAPI(title="VSL Studio", version="2026.11.18.2", lifespan=lifespan)
+app = FastAPI(title="VSL Studio", version="2026.11.18.3", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
 PAGE_HEADERS = {"Cache-Control": "no-cache"}
@@ -142,6 +145,8 @@ def predict_video(content, suffix):
             video.release()
             if tracker:
                 tracker.close()
+                tracker = None
+            release_native_memory()
 
 
 @app.post("/api/upload")
@@ -165,6 +170,8 @@ async def upload(file: UploadFile = File(...), mode: str = Form("letters")):
         raise HTTPException(500, "The sign could not be processed. Please try another file.")
     finally:
         await file.close()
+        content = rgb = None
+        await run_in_threadpool(release_native_memory)
 
 
 @app.post("/api/live/session")
@@ -172,11 +179,14 @@ def create_session(mode: str = Form("letters")):
     validate_mode(mode)
     now = time.monotonic()
     with session_lock:
-        stale = [key for key, session in sessions.items() if now - session.last_seen > 120]
+        stale = [key for key, session in sessions.items() if now - session.last_seen > 120 or
+                 (session.tracker is not None and now - session.capture.started_at > MAX_SEQUENCE_SECONDS + 5)]
         for key in stale:
             sessions.pop(key).close()
         if len(sessions) >= 8:
             raise HTTPException(429, "The camera service is busy. Try again in a moment.")
+        if sum(session.tracker is not None for session in sessions.values()) >= MAX_ACTIVE_CAPTURES:
+            raise HTTPException(429, "Another sign is being recorded. Please try again when that recording finishes.")
         key = secrets.token_urlsafe(24)
         sessions[key] = LiveSession(mode)
     return {"id": key, "capture_mode": "manual", "max_seconds": MAX_SEQUENCE_SECONDS}
