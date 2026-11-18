@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const state = { source: document.body.dataset.page === "webcam" ? "webcam" : "upload", mode: "letters",
   models: [], file: null, previewURL: null, busy: false, result: null, stream: null,
   session: null, running: false, generation: 0, controller: null, timer: null,
+  framePromise: null, finishing: false, maxSeconds: 45,
   demonstrations: [], selectedSign: null, videosOnly: false };
 let toastTimer;
 const samples = [
@@ -141,7 +142,7 @@ function updateModeUI() {
   $("vocabulary-button").disabled = !enabled;
   $("camera-button").disabled = !enabled; $("dropzone").disabled = !enabled;
   $("translate-button").disabled = !state.file || !enabled;
-  $("webcam-description").textContent = isVideo ? "Sign a complete phrase, then keep your hands still for six seconds." : "Hold a clear sign with your hands still for six seconds.";
+  $("webcam-description").textContent = isVideo ? "Sign the complete phrase, then select Finish sign to translate it." : "Make a clear sign, then select Finish sign to translate it.";
 }
 async function changeMode(mode) {
   if (state.busy || state.mode === mode) return;
@@ -176,22 +177,62 @@ async function enableCamera() {
 }
 async function startSign() {
   if (!state.stream || state.running || state.busy) return;
+  const generation = ++state.generation, stream = state.stream;
   showError(); resetResult();
   $("camera-button").disabled = true;
   $("vocabulary-button").disabled = true;
   try {
     const form = new FormData(); form.append("mode", state.mode);
     const session = await request("/api/live/session", { method: "POST", body: form });
-    state.session = session.id; state.running = true; state.generation += 1;
-    $("capture-progress").hidden = false; $("capture-message").textContent = "Bring your hands into view";
-    $("capture-countdown").textContent = ""; $("pause-progress").style.width = "0%";
-    $("camera-state").textContent = "Waiting for your hands"; $("camera-button").querySelector("span").textContent = "Signing…";
+    if (generation !== state.generation || stream !== state.stream) {
+      await fetch("/api/live/" + session.id, { method: "DELETE", keepalive: true }).catch(() => {});
+      return;
+    }
+    state.session = session.id; state.running = true; state.maxSeconds = session.max_seconds || 45;
+    $("capture-progress").hidden = false; $("capture-message").textContent = "Sign naturally. Select Finish sign when you’re done.";
+    $("capture-duration").textContent = "0 / " + state.maxSeconds + "s"; $("capture-meter").style.width = "0%";
+    $("camera-state").textContent = "Recording your sign"; $("camera-button").querySelector("span").textContent = "Finish sign";
+    $("camera-button").querySelector("use").setAttribute("href", "#i-stop"); $("camera-button").disabled = false;
     $("result-status").textContent = "LISTENING TO YOUR HANDS";
-    $("empty-description").textContent = "Take your time. The result appears after your six-second pause.";
+    $("empty-description").textContent = "Sign at your own pace. Select Finish sign to stop recording and get your result.";
     document.querySelectorAll(".mode-button").forEach(button => { button.disabled = true; });
-    pumpFrame(state.generation);
-  } catch (error) { $("camera-button").disabled = false; $("vocabulary-button").disabled = !available(); showError(error.message); }
+    state.framePromise = pumpFrame(state.generation);
+  } catch (error) {
+    if (generation === state.generation) { $("camera-button").disabled = false; $("vocabulary-button").disabled = !available(); showError(error.message); }
+  }
 }
+
+async function finishSign() {
+  if (!state.running || state.finishing || state.busy) return;
+  const generation = state.generation, session = state.session;
+  state.finishing = true; state.running = false; clearTimeout(state.timer);
+  setBusy(true); showError(); loadingResult();
+  $("camera-state").textContent = "Finishing your sign";
+  $("capture-message").textContent = "Recording stopped. Translating your sign…";
+  $("camera-button").querySelector("span").textContent = "Translating…";
+  const started = performance.now();
+  try {
+    // Finish must reach the server AFTER the final in-flight frame. Aborting
+    // that request could discard the user's last pose or clip evidence.
+    await state.framePromise;
+    if (generation !== state.generation || session !== state.session) return;
+    state.controller = new AbortController();
+    const response = await request("/api/live/" + session + "/finish", { method: "POST", signal: state.controller.signal });
+    if (generation !== state.generation || session !== state.session) return;
+    showResult(response.result, performance.now() - started);
+    $("camera-state").textContent = "Sign complete";
+    $("capture-message").textContent = "Ready for your next sign";
+    $("capture-meter").style.width = "100%";
+  } catch (error) {
+    if (error.name !== "AbortError" && generation === state.generation) { showError(error.message); resetResult(); }
+  } finally {
+    if (session === state.session) await endSession();
+    state.finishing = false; setBusy(false);
+    $("camera-button").querySelector("span").textContent = state.stream ? "Start another sign" : "Enable camera";
+    $("camera-button").querySelector("use").setAttribute("href", "#i-camera");
+  }
+}
+
 async function pumpFrame(generation) {
   if (!state.running || generation !== state.generation || !state.stream) return;
   const started = performance.now();
@@ -211,32 +252,30 @@ async function pumpFrame(generation) {
     const response = await request("/api/live/" + state.session + "/frame", { method: "POST", body: form, signal: state.controller.signal });
     if (!state.running || generation !== state.generation) return;
     const phase = response.phase;
-    if (phase === "complete" || phase === "timeout") {
+    if (phase === "timeout") {
       showResult(response.result);
-      $("camera-state").textContent = "Sign complete"; $("capture-message").textContent = "Ready for your next sign";
-      $("capture-countdown").textContent = ""; $("pause-progress").style.width = "100%";
+      $("camera-state").textContent = "Recording limit reached"; $("capture-message").textContent = "Start again and finish within 45 seconds.";
+      $("capture-duration").textContent = state.maxSeconds + "s"; $("capture-meter").style.width = "100%";
       await endSession();
       $("camera-button").querySelector("span").textContent = "Start another sign"; $("camera-button").disabled = false;
+      $("camera-button").querySelector("use").setAttribute("href", "#i-camera");
       document.querySelectorAll(".mode-button").forEach(button => { button.disabled = false; });
       return;
     }
-    if (phase === "holding") {
-      $("camera-state").textContent = "Hold still"; $("capture-message").textContent = "Keep your hands still to finish";
-      $("capture-countdown").textContent = response.remaining.toFixed(1) + "s";
-      $("pause-progress").style.width = ((6 - response.remaining) / 6 * 100) + "%";
-    } else {
-      $("camera-state").textContent = phase === "signing" ? "Capturing your sign" : "Hands out of view";
-      $("capture-message").textContent = phase === "signing" ? "Sign naturally. Pause when you’re finished." : "Keep your hands visible so we can follow your sign";
-      $("capture-countdown").textContent = ""; $("pause-progress").style.width = "0%";
-    }
+    $("camera-state").textContent = phase === "capturing" ? "Recording your sign" : "Hands out of view";
+    $("capture-message").textContent = phase === "capturing" ? "Select Finish sign when you’re done." : "Keep your hands in view. Finish sign stops the recording.";
+    $("capture-duration").textContent = (response.elapsed || 0).toFixed(1) + " / " + state.maxSeconds + "s";
+    $("capture-meter").style.width = Math.min(100, (response.elapsed || 0) / state.maxSeconds * 100) + "%";
   } catch (error) {
     if (error.name === "AbortError" || generation !== state.generation) return;
+    if (state.finishing) throw error;
     await endSession(); $("camera-button").disabled = false; $("camera-button").querySelector("span").textContent = "Start a sign";
+    $("camera-button").querySelector("use").setAttribute("href", "#i-camera");
     document.querySelectorAll(".mode-button").forEach(button => { button.disabled = false; });
     showError(error.message); resetResult(); return;
   }
   // Await each request. At most one frame is in flight; slow inference never queues video.
-  if (state.running && generation === state.generation) state.timer = setTimeout(() => pumpFrame(generation), Math.max(0, 167 - (performance.now() - started)));
+  if (state.running && generation === state.generation) state.timer = setTimeout(() => { state.framePromise = pumpFrame(generation); }, Math.max(0, 167 - (performance.now() - started)));
 }
 async function endSession() {
   state.running = false; state.generation += 1; clearTimeout(state.timer); state.controller?.abort(); state.controller = null;
@@ -250,6 +289,7 @@ async function stopCamera() {
   state.stream = null; $("camera-video").srcObject = null; $("camera-video").hidden = true;
   $("camera-placeholder").hidden = false; $("stop-camera").hidden = true; $("camera-indicator").hidden = true; $("capture-progress").hidden = true;
   $("camera-button").querySelector("span").textContent = "Enable camera"; $("camera-button").disabled = !available();
+  $("camera-button").querySelector("use").setAttribute("href", "#i-camera");
   document.querySelectorAll(".mode-button").forEach(button => { button.disabled = state.busy; });
 }
 const normalizeSign = value => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[.!?]/g, "").trim();
@@ -419,7 +459,7 @@ $("dropzone").addEventListener("dragleave", () => $("dropzone").classList.remove
 $("dropzone").addEventListener("drop", event => { event.preventDefault(); $("dropzone").classList.remove("drag-over"); if (available()) chooseFile(event.dataTransfer.files[0]); });
 $("remove-file").addEventListener("click", () => { clearFile(); resetResult(); showError(); });
 $("translate-button").addEventListener("click", translateUpload);
-$("camera-button").addEventListener("click", () => state.stream ? startSign() : enableCamera());
+$("camera-button").addEventListener("click", () => state.running ? finishSign() : state.stream ? startSign() : enableCamera());
 $("stop-camera").addEventListener("click", stopCamera);
 $("copy-result").addEventListener("click", async () => { try { await navigator.clipboard.writeText(state.result.label); toast("Translation copied."); } catch { toast("Copy isn’t available here. Select the translation to copy it."); } });
 $("speak-result").addEventListener("click", () => {

@@ -49,10 +49,17 @@ produces a retry state rather than an invented translation.
 
 ### Webcam
 
-Enable the camera, press **Start a sign**, then sign naturally and keep your
-hands visible and still for six seconds. Movement restarts the countdown.
-Tracking loss or a processing gap resets it. Results appear only after the
-pause, and sampling stops until **Start another sign** is pressed.
+Enable the camera, press **Start a sign**, sign naturally, then press
+**Finish sign** to stop recording and request a prediction. There is no
+stillness requirement or automatic six-second countdown. The camera preview
+stays available for **Start another sign**. **Turn off camera** cancels a
+recording without translating.
+
+The client stops sending new frames when Finish is pressed and waits for the
+last in-flight frame before calling the finish endpoint. Letter/word inference
+uses the latest clear hand frame, so lowering a hand to click Finish does not
+replace the pose with an empty image. Sentence inference receives all valid
+frames in the user-selected sequence. Repeated Finish requests reuse the result.
 
 The video preview runs natively in the browser, targeting 30 fps. Recognition
 samples unmirrored JPEG frames at at most 6 fps and 640 pixels on the longest
@@ -61,8 +68,9 @@ Each session owns a MediaPipe tracker. The visible preview is mirrored;
 handedness is corrected to the dataset's anatomical left/right convention.
 Camera tracks stop on source/model changes, tab hiding, or page exit.
 
-The 45-second capture limit is a safety stop with a retry message; it does not
-split a continuous recording into fixed prediction windows. Blank/expired
+The 45-second capture limit stops recording with a retry message and does not
+run inference automatically. It does not split a continuous recording into
+fixed prediction windows. Blank/expired
 sessions are removed on new-session creation.
 
 ### What the sentence model can do
@@ -70,7 +78,7 @@ sessions are removed on new-session creation.
 The supplied checkpoint was trained on **individual 126-value vectors**:
 21 landmarks × 3 coordinates × 2 hands. It does not learn temporal motion
 across frames. The new app preserves that input, collects a complete sign,
-excludes the final webcam holding period, and averages per-frame probability
+uses all valid frames until Finish is pressed, and averages per-frame probability
 evidence. Weak or conflicting evidence is marked as a possible match.
 
 This changes segmentation and evidence collection; it does **not** create an
@@ -127,8 +135,8 @@ otherwise the app looks for local checkpoints before the parent weights folder.
 
 The suite exercises real image inference, video decoding, live tracking,
 session lifecycle, left/right ordering, corruption/empty-file rejection,
-blank-input rejection, natural movement boundaries, jitter, dropped tracking,
-and absence of results before the six-second pause. The bundled source-dataset
+blank-input rejection, manual sequence boundaries, tracking loss, cancellation,
+and absence of predictions before Finish is pressed. The bundled source-dataset
 samples recognize **C, B and Y** from the project owner’s photographs. The former D sample was removed because its
 source annotation is Đ, outside the checkpoint's vocabulary. These are pipeline checks, not an independent
 accuracy benchmark. Physical camera smoothness still depends on the device,
@@ -165,3 +173,12 @@ passed. See [training/HKR-RESULTS.md](training/HKR-RESULTS.md) and
 [training/demo-evaluation.json](training/demo-evaluation.json) for the measured
 comparison, source review, and limitations. No user reference photo or raw
 third-party dataset is included in the deployed application.
+
+Client capture/race checks (Node.js, no camera required):
+
+```powershell
+node --test tests/manual-finish-client.test.cjs
+```
+
+Live protocol: POST /api/live/session, stream frames to /api/live/{id}/frame,
+then POST /api/live/{id}/finish. DELETE /api/live/{id} cancels/cleans up.

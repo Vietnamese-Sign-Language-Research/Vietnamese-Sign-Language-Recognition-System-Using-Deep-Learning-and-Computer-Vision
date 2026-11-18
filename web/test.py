@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
-from recognition import BASE_DIR, LiveSession, ModelRegistry, SAMPLE_FPS, hand_tracker, mp_frame_to_126, tracking_image
+from recognition import BASE_DIR, LiveSession, ModelRegistry, MAX_SEQUENCE_SECONDS, SAMPLE_FPS, hand_tracker, mp_frame_to_126, tracking_image
 
 registry = ModelRegistry()
 sessions: dict[str, LiveSession] = {}
@@ -73,7 +73,7 @@ def old_webcam():
 
 @app.get("/api/models")
 def models():
-    return {"models": registry.metadata(), "pause_seconds": 6, "sample_fps": SAMPLE_FPS}
+    return {"models": registry.metadata(), "capture_mode": "manual", "max_sequence_seconds": MAX_SEQUENCE_SECONDS, "sample_fps": SAMPLE_FPS}
 
 
 def validate_mode(mode):
@@ -179,7 +179,7 @@ def create_session(mode: str = Form("letters")):
             raise HTTPException(429, "The camera service is busy. Try again in a moment.")
         key = secrets.token_urlsafe(24)
         sessions[key] = LiveSession(mode)
-    return {"id": key, "pause_seconds": 6}
+    return {"id": key, "capture_mode": "manual", "max_seconds": MAX_SEQUENCE_SECONDS}
 
 
 @app.post("/api/live/{session_id}/frame")
@@ -203,6 +203,19 @@ def delete_session(session_id: str):
     if session:
         session.close()
     return {"closed": True}
+
+
+@app.post("/api/live/{session_id}/finish")
+async def finish_session(session_id: str):
+    with session_lock:
+        session = sessions.get(session_id)
+    if session is None:
+        raise HTTPException(404, "This sign session has ended. Start a new sign.")
+    try:
+        return await run_in_threadpool(session.finish, registry)
+    except Exception:
+        logging.exception("Live sign inference failed")
+        raise HTTPException(500, "The sign could not be processed. Start a new sign and try again.")
 
 
 if __name__ == "__main__":

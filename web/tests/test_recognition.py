@@ -24,67 +24,35 @@ def hand_vector(offset=0):
 
 
 class CaptureTests(unittest.TestCase):
-    def test_six_seconds_of_observed_stillness_finishes_sign(self):
+    def test_stillness_never_finishes_capture(self):
         capture = SequenceCapture()
-        self.assertEqual(capture.observe(None, 0)["phase"], "waiting_hands")
-        capture.observe(hand_vector(), 0.1)
-        for timestamp in np.arange(0.3, 6.2, 0.2):
-            self.assertNotEqual(capture.observe(hand_vector(), float(timestamp))["phase"], "complete")
-        self.assertEqual(capture.observe(hand_vector(), 6.4)["phase"], "complete")
-
-    def test_moving_sign_is_not_cut_at_a_fixed_interval(self):
-        capture = SequenceCapture()
-        for index in range(100):
-            state = capture.observe(hand_vector(0.08 * (index % 2)), index / 6)
-            self.assertEqual(state["phase"], "signing")
+        for timestamp in np.arange(0, 20, .2):
+            self.assertEqual(capture.observe(hand_vector(), float(timestamp))["phase"], "capturing")
         self.assertFalse(capture.done)
-
-    def test_motion_resets_the_pause(self):
-        capture = SequenceCapture()
-        capture.observe(hand_vector(), 0)
-        for timestamp in np.arange(0.2, 4.1, 0.2):
-            capture.observe(hand_vector(), float(timestamp))
-        self.assertEqual(capture.observe(hand_vector(0.1), 4.2)["phase"], "signing")
-        self.assertEqual(capture.observe(hand_vector(0.1), 4.4)["remaining"], 6)
-
-    def test_tracking_loss_and_network_gaps_cannot_finish_sign(self):
-        capture = SequenceCapture()
-        capture.observe(hand_vector(), 0)
-        capture.observe(hand_vector(), 0.2)
-        for timestamp in np.arange(0.4, 3.1, 0.2):
-            capture.observe(hand_vector(), float(timestamp))
-        self.assertEqual(capture.observe(None, 3.2)["phase"], "waiting_hands")
-        self.assertEqual(capture.observe(hand_vector(), 3.4)["phase"], "signing")
-        self.assertEqual(capture.observe(hand_vector(), 3.6)["remaining"], 6)
-        self.assertEqual(capture.observe(hand_vector(), 12)["phase"], "signing")
-        self.assertFalse(capture.done)
-
-    def test_small_jitter_does_not_restart_pause(self):
-        capture = SequenceCapture()
-        capture.observe(hand_vector(), 0)
-        for index in range(1, 40):
-            state = capture.observe(hand_vector(0.003 * (index % 2)), index / 6)
-        self.assertEqual(state["phase"], "complete")
-
-    def test_gradual_motion_is_compared_with_anchor(self):
-        capture = SequenceCapture()
-        capture.observe(hand_vector(), 0)
-        phases = [capture.observe(hand_vector(index * 0.005), index / 6)["phase"] for index in range(1, 20)]
-        self.assertGreater(phases.count("signing"), 2)
-
-    def test_holding_tail_is_excluded_from_phrase_evidence(self):
-        capture = SequenceCapture()
-        for index in range(12):
-            capture.observe(hand_vector(0.08 * (index % 2)), index / 6)
-        for timestamp in np.arange(2.1, 8.5, 0.2):
-            capture.observe(hand_vector(0.08), float(timestamp))
-        self.assertLess(len(capture.active_vectors()), 16)
+        capture.finish()
         self.assertTrue(capture.done)
 
-    def test_capture_safety_limit_returns_timeout(self):
+    def test_motion_tracking_loss_and_network_gaps_do_not_finish(self):
         capture = SequenceCapture()
-        capture.observe(hand_vector(), 0)
-        self.assertEqual(capture.observe(hand_vector(0.1), 46)["phase"], "timeout")
+        for timestamp, vector in [(0, hand_vector()), (1, None), (12, hand_vector(.1)), (30, hand_vector(.2))]:
+            state = capture.observe(vector, timestamp)
+            self.assertNotEqual(state["phase"], "complete")
+        self.assertFalse(capture.done)
+        self.assertEqual(len(capture.active_vectors()), 3)
+
+    def test_manual_capture_keeps_all_valid_frames_including_tail(self):
+        capture = SequenceCapture()
+        for index in range(20):
+            capture.observe(hand_vector(.08 * (index % 2)) if index < 8 else hand_vector(), index / 6)
+        capture.finish()
+        self.assertEqual(len(capture.active_vectors()), 20)
+        np.testing.assert_equal(capture.active_vectors()[-1], hand_vector())
+
+    def test_capture_limit_does_not_depend_on_detecting_hands(self):
+        capture = SequenceCapture()
+        capture.observe(None, 0)
+        self.assertEqual(capture.observe(None, 45)["phase"], "timeout")
+        self.assertTrue(capture.done)
 
     def test_unmirrored_handedness_matches_dataset_order(self):
         points = [SimpleNamespace(x=.2, y=.4, z=.01) for _ in range(21)]
@@ -97,24 +65,87 @@ class CaptureTests(unittest.TestCase):
         self.assertFalse(np.any(selfie[:63]))
         self.assertTrue(np.any(selfie[63:]))
 
-    def test_live_session_emits_result_only_after_pause(self):
+    def test_letter_prediction_waits_for_finish_and_runs_once(self):
         tracker = Mock()
         tracker.process.return_value = SimpleNamespace(multi_hand_landmarks=[object()])
         model = Mock()
         model.image_result.return_value = {"status": "recognized", "label": "A"}
-        with patch("recognition.hand_tracker", return_value=tracker), patch("recognition.mp_frame_to_126", return_value=hand_vector()):
+        with patch("recognition.hand_tracker", return_value=tracker), patch("recognition.mp_frame_to_126", return_value=hand_vector()), patch("recognition.time.monotonic", return_value=0):
             session = LiveSession("letters")
             frame = np.zeros((32, 32, 3), dtype=np.uint8)
-            for timestamp in np.arange(0, 6.2, 0.2):
+            for timestamp in np.arange(0, 12, .2):
                 with patch("recognition.time.monotonic", return_value=float(timestamp)):
-                    result = session.process(frame, model)
-                self.assertNotIn("result", result)
+                    response = session.process(frame, model)
+                self.assertNotIn("result", response)
                 model.image_result.assert_not_called()
-            with patch("recognition.time.monotonic", return_value=6.5):
-                result = session.process(frame, model)
+            result = session.finish(model)
             self.assertEqual(result["result"]["label"], "A")
+            self.assertEqual(session.finish(model), result)
+            self.assertEqual(session.process(frame, model), result)
             model.image_result.assert_called_once()
             session.close()
+
+    def test_finish_uses_last_hand_frame_when_hand_is_lowered_to_click(self):
+        tracker = Mock()
+        tracker.process.side_effect = [SimpleNamespace(multi_hand_landmarks=[object()]), SimpleNamespace(multi_hand_landmarks=None)]
+        model = Mock()
+        with patch("recognition.hand_tracker", return_value=tracker), patch("recognition.mp_frame_to_126", return_value=hand_vector()):
+            session = LiveSession("letters")
+            sign = np.full((32,32,3), 180, dtype=np.uint8)
+            session.process(sign, model)
+            session.process(np.zeros_like(sign), model)
+            session.finish(model)
+            np.testing.assert_equal(model.image_result.call_args.args[0], sign)
+            session.close()
+
+    def test_sentence_finishes_only_on_request_with_the_complete_sequence(self):
+        tracker = Mock()
+        tracker.process.return_value = SimpleNamespace(multi_hand_landmarks=[object()])
+        model = Mock()
+        model.sequence_result.return_value = {"status":"recognized", "label":"Example phrase"}
+        with patch("recognition.hand_tracker", return_value=tracker), patch("recognition.mp_frame_to_126", side_effect=[hand_vector(.08 * (i % 2)) for i in range(15)]):
+            session = LiveSession("sentences")
+            for _ in range(15):
+                response = session.process(np.zeros((32,32,3),dtype=np.uint8), model)
+                self.assertNotIn("result", response)
+            model.sequence_result.assert_not_called()
+            result = session.finish(model)
+            self.assertEqual(result["result"]["label"], "Example phrase")
+            vectors, motion_count = model.sequence_result.call_args.args
+            self.assertEqual(len(vectors), 15)
+            self.assertGreaterEqual(motion_count, 3)
+            model.image_result.assert_not_called()
+            self.assertEqual(session.finish(model), result)
+            model.sequence_result.assert_called_once()
+            session.close()
+
+    def test_finish_empty_capture_does_not_invent_a_letter(self):
+        with patch("recognition.hand_tracker"):
+            session = LiveSession("letters")
+            model = Mock()
+            self.assertEqual(session.finish(model)["result"]["status"], "no_sign")
+            model.image_result.assert_not_called()
+            session.close()
+
+    def test_safety_limit_stops_without_running_inference(self):
+        with patch("recognition.hand_tracker") as tracker, patch("recognition.time.monotonic", return_value=0):
+            tracker.return_value.process.return_value = SimpleNamespace(multi_hand_landmarks=None)
+            session = LiveSession("letters")
+            model = Mock()
+            with patch("recognition.time.monotonic", return_value=46):
+                result = session.process(np.zeros((32,32,3),dtype=np.uint8), model)
+            self.assertEqual(result["phase"], "timeout")
+            self.assertEqual(session.finish(model)["result"]["status"], "no_sign")
+            model.image_result.assert_not_called()
+            session.close()
+
+    def test_cancel_clears_evidence_without_a_prediction(self):
+        with patch("recognition.hand_tracker"):
+            session = LiveSession("letters")
+            model = Mock()
+            session.close()
+            self.assertEqual(session.finish(model)["phase"], "cancelled")
+            model.image_result.assert_not_called()
 
 
 class ApiTests(unittest.TestCase):
@@ -204,21 +235,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/live/{key}").status_code, 200)
         self.assertEqual(self.client.post(f"/api/live/{key}/frame", files={"file": ("frame.jpg", content.getvalue(), "image/jpeg")}).status_code, 404)
 
-    def test_real_sample_tracking_finishes_and_recognizes_held_sign(self):
+    def test_real_camera_frames_are_predicted_only_after_manual_finish(self):
         content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / "sample-y.jpg").read_bytes()
-        session = LiveSession("letters")
+        response = self.client.post("/api/live/session", data={"mode":"letters"})
+        self.assertEqual(response.json()["capture_mode"], "manual")
+        key = response.json()["id"]
         try:
-            result = None
-            for timestamp in np.arange(0, 12, 1 / 6):
-                with patch("recognition.time.monotonic", return_value=float(timestamp)):
-                    result = session.process(decode_image(content), registry)
-                if result["phase"] == "complete":
-                    break
-                self.assertNotIn("result", result)
-            self.assertEqual(result["phase"], "complete", result)
-            self.assertEqual(result["result"]["label"], "Y")
+            for _ in range(5):
+                response = self.client.post(f"/api/live/{key}/frame", files={"file":("frame.jpg",content,"image/jpeg")})
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("result", response.json())
+            result = self.client.post(f"/api/live/{key}/finish")
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["result"]["label"], "Y")
+            self.assertEqual(self.client.post(f"/api/live/{key}/finish").json(), result.json())
         finally:
-            session.close()
+            self.client.delete(f"/api/live/{key}")
+        self.assertEqual(self.client.post(f"/api/live/{key}/finish").status_code,404)
+
+    def test_finishing_blank_sentence_capture_returns_retry_instead_of_a_phrase(self):
+        key=self.client.post("/api/live/session",data={"mode":"sentences"}).json()["id"]
+        try:
+            result=self.client.post(f"/api/live/{key}/finish")
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(result.json()["result"]["status"],"no_sign")
+            self.assertIsNone(result.json()["result"]["label"])
+        finally:
+            self.client.delete(f"/api/live/{key}")
+
 
     def test_navigation_opens_distinct_home_upload_and_webcam_pages(self):
         for path, page in [("/", "home"), ("/home.html", "home"), ("/upload.html", "upload"), ("/webcam.html", "webcam")]:

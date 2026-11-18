@@ -229,7 +229,7 @@ h1 > span { background: linear-gradient(95deg, #86e5ec 4%, #c5b4ff 95%); backgro
 .camera-tip .icon { width: 20px; height: 20px; color: var(--purple); margin-top: 3px; }
 .capture-progress { padding-top: 22px; font-size: 16px; color: var(--muted); }
 .capture-progress > div:first-child { display: flex; justify-content: space-between; gap: 14px; }
-#capture-countdown { color: var(--cyan); font-weight: 700; }
+#capture-duration { color: var(--cyan); font-weight: 700; }
 .progress-track { height: 5px; border-radius: 3px; background: #52617b; margin-top: 13px; overflow: hidden; }
 .progress-track > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--purple), var(--cyan)); transition: width .2s; }
 .input-error { color: var(--danger); font-size: 16px; padding: 16px; border: 1px solid #ffbac260; background: #ffbac20a; border-radius: 9px; margin-top: 22px; }

@@ -8,7 +8,8 @@ larger typography, explicit upload confirmation and native camera preview.
 It uses a retrained demo model for 23 base letters (H/K/R experimental) and
 the existing checkpoint for 60 phrases. Original letter weights are retained
 for fallback and rollback.
-Live capture finishes after six seconds of visible stillness. Single-word
+Live capture finishes when the user presses **Finish sign**; no stillness
+countdown is required. Single-word
 recognition becomes available when a trained word checkpoint is supplied.
 
 With Python 3.10 or 3.11 installed, run from the repository root:

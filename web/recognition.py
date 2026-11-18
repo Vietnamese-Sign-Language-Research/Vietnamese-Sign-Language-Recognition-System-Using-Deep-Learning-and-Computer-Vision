@@ -1,4 +1,4 @@
-"""Model adapters and motion-delimited capture, independent of the web interface."""
+"""Model adapters and user-finished capture, independent of the web interface."""
 from __future__ import annotations
 
 import os
@@ -18,7 +18,6 @@ import torch
 from predict_realtime import CLASS_NAMES_FALLBACK, ResNet1D, load_any_checkpoint, mp_frame_to_126
 
 torch.set_num_threads(min(4, os.cpu_count() or 1))
-PAUSE_SECONDS = 6.0
 MAX_SEQUENCE_SECONDS = 45.0
 SAMPLE_FPS = 6
 PHRASES = [
@@ -66,35 +65,29 @@ def tracking_image(rgb):
 
 
 class SequenceCapture:
-    """Finish after consecutive observed stillness. Gaps reset the pause timer.
-
-    Comparing against an anchor detects gradual motion, while a small dead band
-    rejects tracking jitter. Phrase evidence excludes the final holding period.
-    """
-    def __init__(self, pause_seconds=PAUSE_SECONDS):
-        self.pause_seconds = pause_seconds
+    """Collect the sequence until Finish sign; motion never ends a capture."""
+    def __init__(self, started_at=None):
         self.samples = deque(maxlen=int(MAX_SEQUENCE_SECONDS * SAMPLE_FPS) + 20)
         self.anchor = None
-        self.started_at = self.last_motion = self.last_sample = self.still_since = None
+        self.started_at = started_at
         self.movement_count = 0
         self.done = False
 
     def observe(self, vector, now):
         if self.done:
-            return {"phase": "complete", "remaining": 0}
-        gap = self.last_sample is not None and now - self.last_sample > 1.5
-        self.last_sample = now
-        if self.started_at is not None and now - self.started_at > MAX_SEQUENCE_SECONDS:
-            self.done = True
-            return {"phase": "timeout", "remaining": 0}
-        if gap:
-            self.still_since = self.anchor = None
-        if vector is None or not np.any(vector):
-            self.still_since = self.anchor = None
-            return {"phase": "waiting_hands", "remaining": self.pause_seconds}
-        points = np.asarray(vector, dtype=np.float32).reshape(2, 21, 3)[:, :, :2]
+            return {"phase": "complete"}
         if self.started_at is None:
-            self.started_at = self.last_motion = now
+            self.started_at = now
+        elapsed = max(0.0, now - self.started_at)
+        state = {"elapsed": round(min(elapsed, MAX_SEQUENCE_SECONDS), 1),
+                 "max_seconds": MAX_SEQUENCE_SECONDS}
+        if elapsed >= MAX_SEQUENCE_SECONDS:
+            self.done = True
+            return dict(state, phase="timeout")
+        if vector is None or not np.any(vector):
+            self.anchor = None
+            return dict(state, phase="waiting_hands")
+        points = np.asarray(vector, dtype=np.float32).reshape(2, 21, 3)[:, :, :2]
         self.samples.append((now, np.asarray(vector, dtype=np.float32).copy()))
         moving = self.anchor is None
         if self.anchor is not None:
@@ -106,21 +99,14 @@ class SequenceCapture:
                 moving = moving or float(np.mean(distances)) > 0.018
         if moving:
             self.anchor = points.copy()
-            self.last_motion = now
             self.movement_count += 1
-            self.still_since = None
-            return {"phase": "signing", "remaining": self.pause_seconds}
-        if self.still_since is None:
-            self.still_since = now
-        remaining = max(0.0, self.pause_seconds - (now - self.still_since))
-        if remaining == 0:
-            self.done = True
-            return {"phase": "complete", "remaining": 0}
-        return {"phase": "holding", "remaining": round(remaining, 1)}
+        return dict(state, phase="capturing")
+
+    def finish(self):
+        self.done = True
 
     def active_vectors(self):
-        end = (self.last_motion or 0) + 0.35
-        return [v for timestamp, v in self.samples if timestamp <= end]
+        return [v for _, v in self.samples]
 
 
 class ModelRegistry:
@@ -255,7 +241,7 @@ class ModelRegistry:
 
     def sequence_result(self, vectors, movement_count=None):
         if len(vectors) < 4 or (movement_count is not None and movement_count < 3):
-            return {"status": "no_sign", "label": None, "message": "A sentence needs a complete moving sign. Sign the phrase, then hold still for six seconds."}
+            return {"status": "no_sign", "label": None, "message": "A sentence needs a complete moving sign with several clear frames. Record the full phrase and try again."}
         data = np.asarray(vectors, dtype=np.float32)
         if len(data) > 180:
             data = data[np.linspace(0, len(data) - 1, 180).astype(int)]
@@ -281,30 +267,58 @@ class ModelRegistry:
 class LiveSession:
     def __init__(self, mode):
         self.mode = mode
-        self.capture = SequenceCapture()
+        self.last_seen = time.monotonic()
+        self.capture = SequenceCapture(started_at=self.last_seen)
         self.tracker = hand_tracker()
         self.lock = Lock()
-        self.last_seen = time.monotonic()
         self.result = None
+        self.last_frame = self.last_hand_frame = None
+        self.closed = False
 
     def process(self, rgb, registry):
         with self.lock:
             now = time.monotonic()
             self.last_seen = now
+            if self.closed:
+                return {"phase": "cancelled"}
             if self.capture.done:
-                return {"phase": "complete", "remaining": 0, "result": self.result}
-            tracked = self.tracker.process(tracking_image(rgb))
+                return {"phase": "complete", "result": self.result}
+            frame = tracking_image(rgb)
+            tracked = self.tracker.process(frame)
             vector = mp_frame_to_126(tracked) if tracked.multi_hand_landmarks else None
             state = self.capture.observe(vector, now)
             state["hands"] = len(tracked.multi_hand_landmarks or [])
             if state["phase"] == "timeout":
-                self.result = {"status": "no_sign", "label": None, "message": "This sign session reached 45 seconds. Start a new sign when you're ready."}
+                self.result = {"status": "no_sign", "label": None, "message": "Recording reached 45 seconds. Start again and select Finish sign before the limit."}
                 state["result"] = self.result
-            elif state["phase"] == "complete":
-                self.result = registry.sequence_result(self.capture.active_vectors(), self.capture.movement_count) if self.mode == "sentences" else registry.image_result(rgb, self.mode)
-                state["result"] = self.result
+            else:
+                # Retain only two bounded-size frames. The last clear hand is
+                # useful when a user lowers their signing hand to click Finish.
+                self.last_frame = frame.copy()
+                if tracked.multi_hand_landmarks:
+                    self.last_hand_frame = self.last_frame
             return state
+
+    def finish(self, registry):
+        with self.lock:
+            self.last_seen = time.monotonic()
+            if self.closed:
+                return {"phase": "cancelled"}
+            if self.result is None:
+                self.capture.finish()
+                if self.mode == "sentences":
+                    self.result = registry.sequence_result(self.capture.active_vectors(), self.capture.movement_count)
+                else:
+                    frame = self.last_hand_frame if self.last_hand_frame is not None else self.last_frame
+                    self.result = registry.image_result(frame, self.mode) if frame is not None else {
+                        "status": "no_sign", "label": None,
+                        "message": "No camera frames were recorded. Start a sign, keep your hand in view, then select Finish sign."}
+            return {"phase": "complete", "result": self.result}
 
     def close(self):
         with self.lock:
-            self.tracker.close()
+            if not self.closed:
+                self.closed = True
+                self.tracker.close()
+                self.last_frame = self.last_hand_frame = None
+                self.capture.samples.clear()

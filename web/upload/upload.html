@@ -6,14 +6,15 @@
   <meta name="theme-color" content="#0b1020">
   <meta name="description" content="A workspace for recognizing Vietnamese Sign Language letters and supported phrases. Upload a sign or use your camera.">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
-  <link rel="stylesheet" href="/assets/studio.css?v=owner-samples-1">
-  <script src="/assets/studio.js?v=owner-samples-1" defer></script>
+  <link rel="stylesheet" href="/assets/studio.css?v=manual-finish-1">
+  <script src="/assets/studio.js?v=manual-finish-1" defer></script>
   <title>Upload — VSL Studio</title>
 </head>
 <body data-page="upload">
 <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
@@ -75,16 +76,16 @@
           <div class="samples-section" id="samples-section"><div class="samples-heading"><span>No photo handy? Try a sample.</span><span class="mini-tag">DEMO PHOTOS</span></div><div id="sample-list" class="sample-list"></div><p class="sample-credit">Photos provided by the project owner · C, B and Y.</p></div>
         </div>
         <div id="webcam-panel" aria-labelledby="input-title" hidden>
-          <p class="card-description" id="webcam-description">Make a sign, then keep your hands still for six seconds.</p>
+          <p class="card-description" id="webcam-description">Start a sign, then select Finish sign when you’re done.</p>
           <div class="camera-stage">
             <video id="camera-video" autoplay muted playsinline hidden></video>
             <div id="camera-placeholder" class="camera-placeholder"><span class="upload-glyph"><svg><use href="#i-camera"/></svg></span><strong>A little space to express yourself</strong><span>Good lighting. Hands in view. Your own pace.</span></div>
             <div id="camera-indicator" class="camera-indicator" hidden><span class="status-dot"></span><span id="camera-state">Camera ready</span></div>
             <div class="camera-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           </div>
-          <div id="capture-progress" class="capture-progress" hidden><div><span id="capture-message">Bring your hands into view</span><strong id="capture-countdown"></strong></div><div class="progress-track"><span id="pause-progress"></span></div></div>
+          <div id="capture-progress" class="capture-progress" hidden><div><span id="capture-message">Bring your hands into view</span><strong id="capture-duration"></strong></div><div class="progress-track"><span id="capture-meter"></span></div></div>
           <div class="camera-actions"><button id="stop-camera" class="secondary-button" type="button" hidden>Turn off camera</button><button id="camera-button" class="primary-button" type="button"><svg class="icon"><use href="#i-camera"/></svg><span>Enable camera</span></button></div>
-          <div class="camera-tip"><svg class="icon"><use href="#i-info"/></svg><p>Sign naturally, then hold still with your hands visible. A six-second pause finishes your sign. Each new sign starts when you’re ready.</p></div>
+          <div class="camera-tip"><svg class="icon"><use href="#i-info"/></svg><p>Start a sign, sign naturally, then press Finish sign to stop recording and translate. You don’t need to hold still. Turn off camera cancels without translating.</p></div>
         </div>
         <div id="model-unavailable" class="unavailable-panel" hidden><svg><use href="#i-info"/></svg><h3>This model isn’t connected yet.</h3><p id="unavailable-description"></p><span>Try Letters or Sentences to get started.</span></div>
         <p id="input-error" class="input-error" role="alert" hidden></p>
