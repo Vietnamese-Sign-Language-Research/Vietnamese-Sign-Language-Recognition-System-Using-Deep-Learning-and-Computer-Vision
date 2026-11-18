@@ -6,8 +6,9 @@ const state = { source: document.body.dataset.page === "webcam" ? "webcam" : "up
   demonstrations: [], selectedSign: null, videosOnly: false };
 let toastTimer;
 const samples = [
-  { id: "sample-1", file: "sample-1.jpg", title: "Letter Y" },
-  { id: "sample-2", file: "sample-2.jpg", title: "Letter X" }
+  { id: "sample-c", file: "sample-c.jpg", title: "Letter C" },
+  { id: "sample-b", file: "sample-b.jpg", title: "Letter B" },
+  { id: "sample-y", file: "sample-y.jpg", title: "Letter Y" }
 ];
 const currentModel = () => state.models.find(model => model.id === state.mode);
 const available = () => Boolean(currentModel()?.available);
@@ -396,7 +397,7 @@ async function loadSamples() {
   // Image selection prepares a preview only; the Translate button runs inference.
   for (const sample of samples) {
     const button = document.createElement("button"); button.type = "button"; button.className = "sample-button";
-    button.setAttribute("aria-label", "Preview dataset " + sample.title.toLowerCase());
+    button.setAttribute("aria-label", "Preview " + sample.title.toLowerCase());
     const image = document.createElement("img"); image.src = "/assets/samples/" + sample.file; image.alt = ""; image.loading = "lazy";
     const text = document.createElement("div"), title = document.createElement("strong"), hint = document.createElement("span");
     title.textContent = sample.title; hint.textContent = "Preview sign"; text.append(title, hint); button.append(image, text);

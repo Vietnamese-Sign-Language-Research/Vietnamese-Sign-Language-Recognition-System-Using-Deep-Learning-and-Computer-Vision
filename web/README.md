@@ -129,7 +129,7 @@ The suite exercises real image inference, video decoding, live tracking,
 session lifecycle, left/right ordering, corruption/empty-file rejection,
 blank-input rejection, natural movement boundaries, jitter, dropped tracking,
 and absence of results before the six-second pause. The bundled source-dataset
-samples recognize **Y and X**. The former D sample was removed because its
+samples recognize **C, B and Y** from the project owner’s photographs. The former D sample was removed because its
 source annotation is Đ, outside the checkpoint's vocabulary. These are pipeline checks, not an independent
 accuracy benchmark. Physical camera smoothness still depends on the device,
 browser, and lighting.
@@ -142,7 +142,7 @@ browser, and lighting.
 - `test.py`: FastAPI routes, upload decoding, and session lifecycle.
 - `recognition.py`: model adapters, phrase evidence, and capture state machine.
 - `predict_realtime.py`: original model architecture and label ordering.
-- `assets/samples/SOURCES.md`: unmodified dataset image provenance, CC BY 4.0 attribution.
+- `assets/samples/SOURCES.md`: owner-provided C/B/Y demo photos and historical dataset attribution.
 - `assets/fonts/OFL.txt`: Manrope's SIL Open Font License. Fonts load locally.
 
 Project: https://github.com/MortyPham/Vietnamese-Sign-Language-Recognition-System-Using-Deep-Learning-and-Computer-Vision

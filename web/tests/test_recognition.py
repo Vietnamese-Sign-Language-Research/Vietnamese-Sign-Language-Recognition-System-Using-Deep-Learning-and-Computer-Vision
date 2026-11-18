@@ -137,7 +137,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(modes["letters"]["release_channel"], "demo")
             self.assertEqual(modes["letters"]["experimental_labels"], ["H", "K", "R"])
         self.assertTrue(modes["sentences"]["available"])
-        for name, expected in [("sample-1.jpg", "Y"), ("sample-2.jpg", "X")]:
+        for name, expected in [("sample-c.jpg", "C"), ("sample-b.jpg", "B"), ("sample-y.jpg", "Y")]:
             content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / name).read_bytes()
             response = self.client.post("/api/upload", data={"mode": "letters"}, files={"file": (name, content, "image/jpeg")})
             self.assertEqual(response.status_code, 200, response.text)
@@ -205,7 +205,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/live/{key}/frame", files={"file": ("frame.jpg", content.getvalue(), "image/jpeg")}).status_code, 404)
 
     def test_real_sample_tracking_finishes_and_recognizes_held_sign(self):
-        content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / "sample-1.jpg").read_bytes()
+        content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / "sample-y.jpg").read_bytes()
         session = LiveSession("letters")
         try:
             result = None
