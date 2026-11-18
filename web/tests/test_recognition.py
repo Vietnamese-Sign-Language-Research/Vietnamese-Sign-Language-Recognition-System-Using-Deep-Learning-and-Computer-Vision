@@ -129,7 +129,13 @@ class ApiTests(unittest.TestCase):
 
     def test_loaded_models_and_real_dataset_images(self):
         modes = {item["id"]: item for item in self.client.get("/api/models").json()["models"]}
-        self.assertEqual(modes["letters"]["count"], 22)
+        # Unapproved candidates must leave the existing 22-letter model active.
+        corrected = modes["letters"]["engine"] == "vsl-corrected-ensemble-v1"
+        self.assertEqual(modes["letters"]["count"], 23 if corrected else 22)
+        if corrected:
+            self.assertIn("Đ", modes["letters"]["labels"])
+            self.assertEqual(modes["letters"]["release_channel"], "demo")
+            self.assertEqual(modes["letters"]["experimental_labels"], ["H", "K", "R"])
         self.assertTrue(modes["sentences"]["available"])
         for name, expected in [("sample-1.jpg", "Y"), ("sample-2.jpg", "X")]:
             content = (Path(__file__).resolve().parents[1] / "assets" / "samples" / name).read_bytes()

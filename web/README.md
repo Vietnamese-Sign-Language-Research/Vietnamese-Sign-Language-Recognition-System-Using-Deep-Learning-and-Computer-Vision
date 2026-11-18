@@ -32,7 +32,7 @@ py -3.10 -m venv .venv
 
 | Mode | Input | Model and status |
 | --- | --- | --- |
-| Letters | JPG / PNG / WebP or held webcam sign | Project YOLO alphabet checkpoint; 22 trained letters |
+| Letters | JPG / PNG / WebP or held webcam sign | Retrained skeleton/geometry ensemble; 23 base letters; demo release, H/K/R experimental |
 | Single words | Image or held webcam sign | YOLO adapter implemented; trained word weights are not present |
 | Sentences | MP4 / WebM / MOV / AVI or moving webcam sign | Existing ResNet1D checkpoint; 60 phrases plus idle |
 
@@ -112,7 +112,10 @@ extension, not PyTorch weights. It is preserved but is not used. Alphabet
 weights were downloaded from this project's public repository into
 `weights/alphabet_model.pt`.
 
-For a repository clone, default model paths are `../weights/alphabet_model.pt`
+For a repository clone, the demo letter checkpoint is `../weights/letter_skeleton.pt`.
+The original YOLO remains at `../weights/alphabet_model.pt` for scoped fallback and rollback.
+Set `VSL_LETTER_ENGINE=legacy` to restore the original 22-letter engine.
+Other default model paths are `../weights/alphabet_model.pt`
 and `../weights/sentence_resnet_model.pt`. Environment overrides take priority;
 otherwise the app looks for local checkpoints before the parent weights folder.
 
@@ -149,3 +152,16 @@ Research paper: https://docs.google.com/document/d/1FpAOx5w2dIDbhCpRAPXXTfhFj6V8
 Training dataset: https://universe.roboflow.com/ho-chi-minh-university-of-technology-clmwp/vietnam-sign-language
 
 Sentence extraction reference: https://github.com/khooinguyeen/Vietnamese-Sign-Language-Translation
+
+## Retrained letter demo release
+
+The user-approved retrained model is deployed as a demo release. It supports
+23 base letters, including Đ; H, K and R remain experimental and return a
+possible-match state. The original model remains available for rollback.
+
+The checkpoint records approved_for_demo=True and approved_for_production=False.
+Failed H/K/R quality checks remain recorded rather than being presented as
+passed. See [training/HKR-RESULTS.md](training/HKR-RESULTS.md) and
+[training/demo-evaluation.json](training/demo-evaluation.json) for the measured
+comparison, source review, and limitations. No user reference photo or raw
+third-party dataset is included in the deployed application.

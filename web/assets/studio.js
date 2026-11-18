@@ -264,7 +264,7 @@ function validDemo(demo) {
     (demo.end === undefined || demo.end > (demo.start || 0));
 }
 const demoForSign = label => state.demonstrations.find(demo => normalizeSign(demo.label) === normalizeSign(label));
-const letterIllustrations = new Set("ABCDEGHIKLMNOPQRSTUVXY");
+const letterIllustrations = new Set("ABCDĐEGHIKLMNOPQRSTUVXY");
 const dictionaryLetterVideos = new Set("ABCDEGHIMNOPQRTUVXY");
 const letterDictionary = "https://tudienngonngukyhieu.com/bang-chu-cai-ngon-ngu-ky-hieu";
 const alphabetLesson = "https://www.youtube.com/watch?v=ggQY-g4aQp8";
@@ -349,7 +349,7 @@ function showLetterGuide(label) {
       hint.textContent = "The illustration could not load. You can still open the video tutorial.";
     };
     image.alt = "National fingerspelling illustration of the handshape for " + label;
-    image.src = "/assets/signs/letters/" + label.toLowerCase() + ".png";
+    image.src = "/assets/signs/letters/" + (label === "Đ" ? "dd" : label.toLowerCase()) + ".png";
   } else {
     image.removeAttribute("src");
   }

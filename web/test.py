@@ -36,6 +36,7 @@ async def lifespan(app):
     for session in list(sessions.values()):
         session.close()
     sessions.clear()
+    registry.close()
 
 
 app = FastAPI(title="VSL Studio", lifespan=lifespan)

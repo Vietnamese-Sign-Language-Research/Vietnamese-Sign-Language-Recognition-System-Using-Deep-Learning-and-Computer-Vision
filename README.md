@@ -5,7 +5,9 @@ This is the code and data for the research project Vietnamese Sign Language Reco
 
 The redesigned interface has separate Home, Upload and Live Webcam pages,
 larger typography, explicit upload confirmation and native camera preview.
-It recognizes 22 trained letters and 60 phrases using the included checkpoints.
+It uses a retrained demo model for 23 base letters (H/K/R experimental) and
+the existing checkpoint for 60 phrases. Original letter weights are retained
+for fallback and rollback.
 Live capture finishes after six seconds of visible stillness. Single-word
 recognition becomes available when a trained word checkpoint is supplied.
 

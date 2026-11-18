@@ -128,6 +128,7 @@ class ModelRegistry:
         self.detectors, self.errors = {}, {}
         self.lock = Lock()
         self.sentence = None
+        self.letters = None
         self.class_names = []
         self.mu = np.zeros(126, dtype=np.float32)
         self.sd = np.ones(126, dtype=np.float32)
@@ -151,9 +152,20 @@ class ModelRegistry:
             self.errors["sentences"] = f"Sentence model could not load: {type(exc).__name__}."
         for mode, env, filename in [("letters", "VSL_LETTER_MODEL", "alphabet_model.pt"),
                                     ("words", "VSL_WORD_MODEL", "word_model.pt")]:
+            if mode == "letters" and os.environ.get("VSL_LETTER_ENGINE", "auto") != "legacy" and not os.environ.get("VSL_LETTER_MODEL"):
+                skeleton_path = model_path("VSL_LETTER_SKELETON", BASE_DIR / "weights" / "letter_skeleton.pt",
+                                           BASE_DIR.parent / "weights" / "letter_skeleton.pt")
+                if skeleton_path.is_file():
+                    try:
+                        from letter_skeleton import SkeletonRecognizer
+                        self.letters = SkeletonRecognizer(skeleton_path, allow_demo=True)
+                    except Exception as exc:
+                        self.errors[mode] = f"Vietnamese letter model could not load: {type(exc).__name__}."
+                        continue
             path = model_path(env, BASE_DIR / "weights" / filename, BASE_DIR.parent / "weights" / filename)
             if not path.is_file():
-                self.errors[mode] = "This model's trained weights have not been added yet."
+                if mode != "letters" or self.letters is None:
+                    self.errors[mode] = "This model's trained weights have not been added yet."
                 continue
             try:
                 from ultralytics import YOLO
@@ -162,7 +174,8 @@ class ModelRegistry:
                     raise ValueError("Expected a detection or classification checkpoint")
                 self.detectors[mode] = detector
             except Exception as exc:
-                self.errors[mode] = f"Model could not load: {type(exc).__name__}."
+                if mode != "letters" or self.letters is None:
+                    self.errors[mode] = f"Model could not load: {type(exc).__name__}."
 
     def metadata(self):
         result = []
@@ -170,21 +183,56 @@ class ModelRegistry:
             detector = self.detectors.get(mode)
             available = detector is not None if mode != "sentences" else self.sentence is not None
             labels = list(detector.names.values()) if detector else [DISPLAY_LABELS.get(x, x) for x in self.class_names if x != "idle"] if mode == "sentences" else []
+            if mode == "letters" and self.letters is not None:
+                available, labels = True, list(self.letters.labels)
             result.append({"id": mode, "title": title, "available": available, "labels": labels,
                 "count": len(labels), "reason": self.errors.get(mode, ""),
+                "engine": self.letters.engine if mode == "letters" and self.letters else "resnet1d" if mode == "sentences" else "yolo",
+                "release_channel": getattr(self.letters, "release_channel", "production") if mode == "letters" else "production",
+                "experimental_labels": getattr(self.letters, "experimental_labels", []) if mode == "letters" else [],
                 "accepts": ["video"] if mode == "sentences" else ["image"],
                 "description": "Recognize a supported letter from a clear hand photo." if mode == "letters" else
                     "Recognize an isolated sign from a photo." if mode == "words" else
                     "Match a complete sign clip to one of the supported phrases.",
                 "note": f"Matches a vocabulary of {len(labels)} learned phrases. Results are suggestions; please confirm their meaning." if mode == "sentences" else
-                    "Recognizes the 22 letters included in the trained checkpoint." if mode == "letters" else
+                    f"Recognizes {len(labels)} trained Vietnamese base letters. H, K and R are experimental. Accent and tone marks are not included." if mode == "letters" and self.letters and getattr(self.letters, "experimental_labels", []) else
+                    f"Recognizes {len(labels)} trained Vietnamese base letters. Accent and tone marks are not included." if mode == "letters" and self.letters else
+                    f"Recognizes the {len(labels)} letters included in the trained checkpoint." if mode == "letters" else
                     "Add a trained single-word YOLO checkpoint to enable recognition."})
         return result
 
     def available(self, mode):
-        return mode in self.detectors or (mode == "sentences" and self.sentence is not None)
+        return mode in self.detectors or (mode == "letters" and self.letters is not None) or (mode == "sentences" and self.sentence is not None)
+
+    def close(self):
+        if self.letters is not None:
+            self.letters.close()
+            self.letters = None
 
     def image_result(self, rgb, mode):
+        if mode == "letters" and self.letters is not None:
+            with self.lock:
+                primary = self.letters.image_result(rgb)
+            # Retain the original detector for confident, non-conflicting photo
+            # cases. It must never reintroduce the audited H/K/R or D/Đ mapping.
+            alternatives = primary.get("details", {}).get("alternatives", [])
+            proposed = alternatives[0]["label"] if alternatives else None
+            if primary["status"] != "recognized" and proposed not in {"H", "K", "R"} and "letters" in self.detectors:
+                fallback = self._detector_image_result(rgb, mode)
+                details = fallback.get("details", {})
+                boxes = [b for b in details.get("boxes", []) if b["label"] == fallback.get("label") and b["score"] >= .75]
+                # A low-resolution teaching photo can show the same sign with
+                # two hands. Require separate, agreeing detections before using
+                # the lower threshold; duplicate boxes on one hand do not count.
+                agreement = any(abs((a["bounds"][0]+a["bounds"][2])-(b["bounds"][0]+b["bounds"][2]))/2 > .25
+                                for i,a in enumerate(boxes) for b in boxes[i+1:])
+                if fallback.get("label") not in {None, "H", "K", "R", "D"} and (details.get("score", 0) >= .85 or agreement):
+                    fallback["details"]["note"] = "Original photo detector fallback; H/K/R and the ambiguous D mapping are excluded."
+                    return fallback
+            return primary
+        return self._detector_image_result(rgb, mode)
+
+    def _detector_image_result(self, rgb, mode):
         with self.lock:
             prediction = self.detectors[mode].predict(source=np.ascontiguousarray(rgb[:, :, ::-1]),
                 imgsz=640, conf=0.35, verbose=False, device="cpu", max_det=4)[0]
